@@ -1447,7 +1447,7 @@ void BaseRealSenseNode::frame_callback(rs2::frame frame)
         {
             t = ros::Time(_ros_time_base.toSec()+ (/*ms*/ frame_time - /*ms*/ _camera_time_base) / /*ms to seconds*/ 1000);
         }
-
+        rs2_metadata_type frame_metadata_laser_power_mode;
         if (frame.is<rs2::frameset>())
         {
             ROS_DEBUG("Frameset arrived.");
@@ -1461,6 +1461,13 @@ void BaseRealSenseNode::frame_callback(rs2::frame frame)
                 auto stream_index = f.get_profile().stream_index();
                 auto stream_format = f.get_profile().format();
                 auto stream_unique_id = f.get_profile().unique_id();
+                if(f.supports_frame_metadata(RS2_FRAME_METADATA_FRAME_LASER_POWER_MODE)){
+                    frame_metadata_laser_power_mode = f.get_frame_metadata(RS2_FRAME_METADATA_FRAME_LASER_POWER_MODE);
+                    ROS_DEBUG("support Frameset contain (%s, %lld)\n",rs2_stream_to_string(stream_type),frame_metadata_laser_power_mode);
+                }
+                else{
+                    ROS_DEBUG("Not support Frameset contain %s\n",rs2_stream_to_string(stream_type));
+                }
 
                 ROS_DEBUG("Frameset contain (%s, %d, %s %d) frame. frame_number: %llu ; frame_TS: %f ; ros_TS(NSec): %lu",
                             rs2_stream_to_string(stream_type), stream_index, rs2_format_to_string(stream_format), stream_unique_id, frame.get_frame_number(), frame_time, t.toNSec());
@@ -1503,7 +1510,6 @@ void BaseRealSenseNode::frame_callback(rs2::frame frame)
             //
             bool points_in_set(false);
             std::vector<rs2::frame> frames_to_publish;
-            std::vector<stream_index_pair> is_in_set;
             for (auto it = frameset.begin(); it != frameset.end(); ++it)
             {
                 auto f = (*it);
@@ -1520,16 +1526,23 @@ void BaseRealSenseNode::frame_callback(rs2::frame frame)
                     continue;
                 }
                 stream_index_pair sip{stream_type,stream_index};
-                if (std::find(is_in_set.begin(), is_in_set.end(), sip) == is_in_set.end())
-                {
-                    is_in_set.push_back(sip);
+                std::string stream_data_name = rs2_stream_to_string(stream_type);
+                if(stream_data_name.compare("Color") == 0){
                     frames_to_publish.push_back(f);
+                }else if(stream_data_name.compare("Infrared") == 0 && frame_metadata_laser_power_mode == 0 ){
+                    frames_to_publish.push_back(f);
+                }else if(stream_data_name.compare("Depth") == 0 && frame_metadata_laser_power_mode == 1 ){
+                    frames_to_publish.push_back(f);
+                }else{
+                    continue;
                 }
+                    
                 if (_align_depth && stream_type == RS2_STREAM_DEPTH && stream_format == RS2_FORMAT_Z16)
                 {
                     is_depth_arrived = true;
                 }
             }
+            ROS_DEBUG("List of frames_to_publish : size: %d", static_cast<int>(frames_to_publish.size()));
 
             for (auto it = frames_to_publish.begin(); it != frames_to_publish.end(); ++it)
             {
